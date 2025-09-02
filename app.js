@@ -66,8 +66,16 @@ return res.json();
 
 function renderCountry(country) {
 const { flags, name, capital, population, region } = country;
-els.flag.src = flags && (flags.svg || flags.png);
-els.flag.srcset = flags && flags.png ? `${flags.png} 1x, ${flags.svg} 2x` : '';
+// Only set flag src if flags exist
+if (flags && (flags.svg || flags.png)) {
+  els.flag.src = flags.svg || flags.png;
+  els.flag.srcset = flags.png ? `${flags.png} 1x, ${flags.svg} 2x` : '';
+  els.flag.style.display = 'block';
+} else {
+  els.flag.src = '';
+  els.flag.srcset = '';
+  els.flag.style.display = 'none';
+}
 els.flag.loading = 'lazy';
 els.name.textContent = name.common;
 els.capital.textContent = (capital && capital[0]) || '—';
@@ -84,7 +92,14 @@ els.feels.textContent = `Feels like ${feels}°C`;
 els.wind.textContent = `Wind: ${Math.round(w.wind.speed)} m/s`;
 els.humidity.textContent = `Humidity: ${w.main.humidity}%`;
 els.wdesc.textContent = w.weather[0].description;
-els.wicon.src = `https://openweathermap.org/img/wn/${w.weather[0].icon}@2x.png`;
+// Only set weather icon if weather data exists
+if (w.weather && w.weather[0] && w.weather[0].icon) {
+  els.wicon.src = `https://openweathermap.org/img/wn/${w.weather[0].icon}@2x.png`;
+  els.wicon.style.display = 'block';
+} else {
+  els.wicon.src = '';
+  els.wicon.style.display = 'none';
+}
 }
 
 
@@ -95,11 +110,13 @@ const query = els.query.value.trim();
 if (!query) return;
 
 setLoading(true);
+showCard(false); // Hide card while loading
 try {
   const country = await fetchCountry(query);
   const weather = await fetchWeather(country.capital[0], country.cca2);
   renderCountry(country);
   renderWeather(weather);
+  showCard(true); // Show card with data
   setStatus('');
 } catch (error) {
   console.error('Error:', error);
