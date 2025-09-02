@@ -26,17 +26,42 @@ const els = {
   geoBtn: document.getElementById('geoBtn'),
   themeToggle: document.getElementById('themeToggle')
 };
+
+// Check if all required elements exist
+const requiredElements = ['form', 'query', 'status', 'card'];
+const missingElements = requiredElements.filter(id => !els[id]);
+if (missingElements.length > 0) {
+  console.error('Missing required DOM elements:', missingElements);
+}
+
+// Helpers
 const fmtInt = (n) => new Intl.NumberFormat().format(n);
-const setStatus = (msg = '') => (els.status.textContent = msg);
-const showCard = (show) => (els.card.hidden = !show);
+const setStatus = (msg = '') => {
+  if (els.status) {
+    els.status.textContent = msg;
+  } else {
+    console.warn('Status element not found');
+  }
+};
+const showCard = (show) => {
+  if (els.card) {
+    els.card.hidden = !show;
+  } else {
+    console.warn('Card element not found');
+  }
+};
 const setLoading = (isLoading) => {
 if (isLoading) {
-showCard(true);
-els.card.classList.add('skeleton');
-setStatus('Loading…');
+  showCard(true);
+  if (els.card) {
+    els.card.classList.add('skeleton');
+  }
+  setStatus('Loading…');
 } else {
-els.card.classList.remove('skeleton');
-setStatus('');
+  if (els.card) {
+    els.card.classList.remove('skeleton');
+  }
+  // Don't clear status here, let the calling function handle it
 }
 };
 
@@ -44,11 +69,45 @@ setStatus('');
 // Fetch country data
 async function fetchCountry(name) {
 const url = `https://restcountries.com/v3.1/name/${encodeURIComponent(name)}?fullText=false&fields=name,capital,flags,population,cca2,region`;
-const res = await fetch(url);
-if (!res.ok) throw new Error(`Country not found: ${name}`);
-const data = await res.json();
-// pick the best match (first item usually)
-return data[0];
+console.log('Fetching country from:', url);
+
+try {
+  const res = await fetch(url);
+  console.log('Response status:', res.status, res.statusText);
+  
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error(`Country "${name}" not found. Please check the spelling and try again.`);
+    } else {
+      throw new Error(`Failed to fetch country data (${res.status}). Please try again later.`);
+    }
+  }
+  
+  const data = await res.json();
+  console.log('Country data received:', data);
+  
+  if (!data || data.length === 0) {
+    throw new Error(`No results found for "${name}". Please try a different country name.`);
+  }
+  
+  // pick the best match (first item usually)
+  return data[0];
+} catch (error) {
+  console.error('fetchCountry error:', error);
+  
+  // Handle network errors
+  if (error.name === 'TypeError' && (error.message.includes('fetch') || error.message.includes('Failed to fetch'))) {
+    throw new Error('Network error. Please check your internet connection and try again.');
+  }
+  
+  // Handle JSON parsing errors
+  if (error.name === 'SyntaxError') {
+    throw new Error(`Invalid response from country service. Please try again later.`);
+  }
+  
+  // Re-throw our custom error messages
+  throw error;
+}
 }
 
 
@@ -58,9 +117,24 @@ const url = new URL('https://api.openweathermap.org/data/2.5/weather');
 url.searchParams.set('q', `${city},${countryCode}`);
 url.searchParams.set('appid', window.CONFIG.OPENWEATHER_API_KEY);
 url.searchParams.set('units', 'metric');
-const res = await fetch(url.toString());
-if (!res.ok) throw new Error('Weather not available');
-return res.json();
+try {
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    if (res.status === 404) {
+      throw new Error(`Weather data not available for ${city}. The capital city might not be recognized by the weather service.`);
+    } else if (res.status === 401) {
+      throw new Error('Weather service authentication failed. Please check API configuration.');
+    } else {
+      throw new Error(`Weather service error. Please try again later.`);
+    }
+  }
+  return await res.json();
+} catch (error) {
+  if (error.name === 'TypeError' && error.message.includes('fetch')) {
+    throw new Error('Network error. Please check your internet connection and try again.');
+  }
+  throw error; // Re-throw the original error if it's already handled
+}
 }
 
 
@@ -240,22 +314,72 @@ switch (weatherType) {
 async function handleSearch(e) {
 e.preventDefault();
 const query = els.query.value.trim();
-if (!query) return;
 
+// Input validation
+if (!query) {
+  setStatus('Please enter a country name to search.');
+  showCard(false);
+  return;
+}
+
+if (query.length < 2) {
+  setStatus('Please enter at least 2 characters.');
+  showCard(false);
+  return;
+}
+
+// Clear previous status and start loading
+setStatus('');
 setLoading(true);
-showCard(false); // Hide card while loading
+showCard(false);
+
 try {
+  console.log(`Searching for country: "${query}"`);
+  
   const country = await fetchCountry(query);
+  console.log('Country found:', country.name.common);
+  
+  // Check if country has a capital
+  if (!country.capital || country.capital.length === 0) {
+    throw new Error(`${country.name.common} doesn't have a recognized capital city for weather data.`);
+  }
+  
+  console.log(`Fetching weather for: ${country.capital[0]}, ${country.cca2}`);
   const weather = await fetchWeather(country.capital[0], country.cca2);
+  
+  // Render the results
   renderCountry(country);
   renderWeather(weather);
-  showCard(true); // Show card with data
-  setStatus('');
+  showCard(true);
+  setStatus(''); // Clear any previous error messages
+  
 } catch (error) {
-  console.error('Error:', error);
-  setStatus(`Error: ${error.message}`);
+  console.error('Search error:', error);
+  
+  // Display user-friendly error message with emojis
+  let errorMessage = error.message;
+  let displayMessage = '';
+  
+  // Handle specific error cases with appropriate emojis and suggestions
+  if (errorMessage.includes('not found')) {
+    displayMessage = `❌ ${errorMessage}\n💡 Try searching for: "United States", "India", "France", "Germany", "Japan"`;
+  } else if (errorMessage.includes('No results found')) {
+    displayMessage = `❌ ${errorMessage}\n💡 Try searching for: "United States", "India", "France", "Germany", "Japan"`;
+  } else if (errorMessage.includes('Network error')) {
+    displayMessage = `🌐 ${errorMessage}`;
+  } else if (errorMessage.includes('Weather data not available')) {
+    displayMessage = `🌤️ ${errorMessage}`;
+  } else if (errorMessage.includes('capital city')) {
+    displayMessage = `🏛️ ${errorMessage}`;
+  } else if (errorMessage.includes('Invalid response')) {
+    displayMessage = `⚠️ ${errorMessage}`;
+  } else {
+    displayMessage = `⚠️ ${errorMessage}`;
+  }
+  
+  console.log('Setting status message:', displayMessage);
+  setStatus(displayMessage);
   showCard(false);
-  // Reset to default theme on error
   resetWeatherTheme();
 } finally {
   setLoading(false);
@@ -285,3 +409,15 @@ localStorage.setItem('theme', theme);
 // Initialize theme toggle state
 const currentTheme = localStorage.getItem('theme') || 'dark';
 els.themeToggle.checked = currentTheme === 'light';
+
+// Test function for error handling (can be called from console)
+window.testInvalidCountry = function() {
+  els.query.value = 'invalidcountryname123';
+  handleSearch({preventDefault: () => {}});
+};
+
+// Add some example suggestions
+window.countrySuggestions = [
+  'United States', 'India', 'France', 'Germany', 'Japan', 
+  'Australia', 'Canada', 'Brazil', 'Italy', 'Spain'
+];
