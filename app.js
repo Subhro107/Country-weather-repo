@@ -386,6 +386,266 @@ try {
 }
 }
 
+// Handle geolocation button click
+async function handleGeolocation() {
+if (!navigator.geolocation) {
+  setStatus('🌐 Geolocation is not supported by this browser.');
+  return;
+}
+
+setStatus('📍 Getting your location...');
+setLoading(true);
+showCard(false);
+
+navigator.geolocation.getCurrentPosition(
+  async (position) => {
+    try {
+      const { latitude, longitude } = position.coords;
+      console.log('User coordinates:', latitude, longitude);
+      
+      // Use reverse geocoding to get location details
+      const locationData = await fetchLocationFromCoords(latitude, longitude);
+      console.log('Location data:', locationData);
+      
+      if (!locationData || !locationData.country) {
+        throw new Error('Could not determine your country from your location.');
+      }
+      
+      // Try to fetch country data using the country code first, then country name
+      let country;
+      try {
+        // First try with country code if available
+        if (locationData.countryCode === 'IN' || locationData.country === 'India') {
+          console.log('Detected India, fetching India data directly');
+          country = await fetchCountryByCode('IN');
+        } else if (locationData.countryCode && locationData.countryCode.length === 2) {
+          console.log('Trying country code lookup:', locationData.countryCode);
+          country = await fetchCountryByCode(locationData.countryCode);
+        }
+      } catch (error) {
+        console.log('Country code lookup failed, trying country name');
+      }
+      
+      // If country code lookup failed, try with country name
+      if (!country && locationData.country) {
+        console.log('Trying country name lookup:', locationData.country);
+        
+        // Handle specific case where Baranagar should be India
+        if (locationData.name && locationData.name.toLowerCase().includes('baranagar')) {
+          console.log('Baranagar detected, forcing India lookup');
+          try {
+            country = await fetchCountryByCode('IN');
+          } catch (e) {
+            country = await fetchCountry('India');
+          }
+        } else {
+          // For other locations, try the detected country name
+          try {
+            country = await fetchCountry(locationData.country);
+          } catch (e) {
+            // If that fails and we think it's India, try India
+            if (locationData.country === 'IN' || locationData.country === 'India') {
+              country = await fetchCountry('India');
+            } else {
+              throw e;
+            }
+          }
+        }
+      }
+      
+      if (!country) {
+        throw new Error('Could not find country information for your location.');
+      }
+      
+      // Check if country has a capital
+      if (!country.capital || country.capital.length === 0) {
+        throw new Error(`${country.name.common} doesn't have a recognized capital city for weather data.`);
+      }
+      
+      // Fetch weather for the capital
+      const weather = await fetchWeather(country.capital[0], country.cca2);
+      
+      // Render results
+      renderCountry(country);
+      renderWeather(weather);
+      showCard(true);
+      
+      const locationName = locationData.city || locationData.name || country.name.common;
+      setStatus(`📍 Showing weather for ${locationName} (${country.name.common})`);
+      
+    } catch (error) {
+      console.error('Geolocation error:', error);
+      setStatus(`❌ ${error.message}`);
+      showCard(false);
+      resetWeatherTheme();
+    } finally {
+      setLoading(false);
+    }
+  },
+  (error) => {
+    console.error('Geolocation error:', error);
+    let errorMessage = '';
+    
+    switch (error.code) {
+      case error.PERMISSION_DENIED:
+        errorMessage = '❌ Location access denied. Please allow location access and try again.';
+        break;
+      case error.POSITION_UNAVAILABLE:
+        errorMessage = '❌ Location information is unavailable. Please try again later.';
+        break;
+      case error.TIMEOUT:
+        errorMessage = '❌ Location request timed out. Please try again.';
+        break;
+      default:
+        errorMessage = '❌ An unknown error occurred while retrieving location.';
+        break;
+    }
+    
+    setStatus(errorMessage);
+    showCard(false);
+    setLoading(false);
+    resetWeatherTheme();
+  },
+  {
+    enableHighAccuracy: true,
+    timeout: 15000,
+    maximumAge: 300000 // 5 minutes
+  }
+);
+}
+
+// Fetch location data from coordinates using OpenWeatherMap reverse geocoding
+async function fetchLocationFromCoords(lat, lon) {
+const url = `https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=5&appid=${window.CONFIG.OPENWEATHER_API_KEY}`;
+
+try {
+  console.log('Fetching location for coordinates:', lat, lon);
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error('Failed to get location data from coordinates.');
+  }
+  
+  const data = await res.json();
+  console.log('All reverse geocoding results:', data);
+  
+  if (data && data.length > 0) {
+    // Log all results to see what we're getting
+    data.forEach((result, index) => {
+      console.log(`Result ${index}:`, {
+        name: result.name,
+        state: result.state,
+        country: result.country,
+        lat: result.lat,
+        lon: result.lon
+      });
+    });
+    
+    let bestMatch = data[0]; // Default to first result
+    
+    // Manual override for known locations in India
+    const locationName = bestMatch.name?.toLowerCase();
+    if (locationName && isIndianLocation(locationName, lat, lon)) {
+      console.log('Detected Indian location, overriding country to India');
+      bestMatch = {
+        ...bestMatch,
+        country: 'IN',
+        countryName: 'India'
+      };
+    }
+    
+    // Try to find a better match for India in the results
+    const indiaMatch = data.find(location => 
+      location.country === 'IN' || 
+      location.country === 'India' ||
+      (location.state && location.state.toLowerCase().includes('bengal')) ||
+      (location.state && location.state.toLowerCase().includes('west bengal'))
+    );
+    
+    if (indiaMatch) {
+      console.log('Found India/Bengal match in results:', indiaMatch);
+      bestMatch = indiaMatch;
+    }
+    
+    console.log('Using location:', bestMatch);
+    
+    return {
+      name: bestMatch.name,
+      city: bestMatch.name,
+      state: bestMatch.state,
+      country: bestMatch.countryName || bestMatch.country,
+      countryCode: bestMatch.country === 'IN' ? 'IN' : bestMatch.country
+    };
+  } else {
+    throw new Error('No location data found for your coordinates.');
+  }
+} catch (error) {
+  console.error('Reverse geocoding error:', error);
+  throw new Error('Could not determine your location. Please try searching manually.');
+}
+}
+
+// Function to detect if a location is in India based on coordinates and name
+function isIndianLocation(locationName, lat, lon) {
+// India's approximate bounding box coordinates
+const indiaBounds = {
+  north: 37.6,
+  south: 6.4,
+  east: 97.25,
+  west: 68.7
+};
+
+// Check if coordinates are within India's bounds
+const withinIndiaBounds = lat >= indiaBounds.south && 
+                         lat <= indiaBounds.north && 
+                         lon >= indiaBounds.west && 
+                         lon <= indiaBounds.east;
+
+// Known Indian cities/locations (add more as needed)
+const indianLocations = [
+  'baranagar', 'barahanagar', 'kolkata', 'calcutta', 'delhi', 'mumbai', 
+  'bangalore', 'hyderabad', 'chennai', 'pune', 'ahmedabad', 'surat',
+  'jaipur', 'lucknow', 'kanpur', 'nagpur', 'patna', 'indore', 'thane',
+  'bhopal', 'visakhapatnam', 'vadodara', 'firozabad', 'ludhiana',
+  'rajkot', 'agra', 'siliguri', 'durgapur', 'asansol', 'howrah'
+];
+
+const isKnownIndianLocation = indianLocations.some(city => 
+  locationName.includes(city) || city.includes(locationName)
+);
+
+console.log('Location check:', {
+  locationName,
+  withinIndiaBounds,
+  isKnownIndianLocation,
+  coordinates: {lat, lon}
+});
+
+return withinIndiaBounds || isKnownIndianLocation;
+}
+
+// Fetch country data by country code (ISO 3166-1 alpha-2)
+async function fetchCountryByCode(countryCode) {
+const url = `https://restcountries.com/v3.1/alpha/${countryCode}?fields=name,capital,flags,population,cca2,region`;
+console.log('Fetching country by code:', url);
+
+try {
+  const res = await fetch(url);
+  console.log('Country by code response status:', res.status);
+  
+  if (!res.ok) {
+    throw new Error(`Country code lookup failed: ${countryCode}`);
+  }
+  
+  const data = await res.json();
+  console.log('Country by code data:', data);
+  
+  return data;
+} catch (error) {
+  console.error('fetchCountryByCode error:', error);
+  throw error;
+}
+}
+
 // Function to reset weather theme to default
 function resetWeatherTheme() {
 const weatherClasses = [
@@ -395,9 +655,11 @@ const weatherClasses = [
 document.body.classList.remove(...weatherClasses);
 }
 
-
 // Event listeners
 els.form.addEventListener('submit', handleSearch);
+
+// Geolocation button
+els.geoBtn.addEventListener('click', handleGeolocation);
 
 // Theme toggle
 els.themeToggle.addEventListener('change', (e) => {
