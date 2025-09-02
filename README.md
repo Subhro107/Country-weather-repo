@@ -1,0 +1,3 @@
+This webpage lets users input for any country and displays it's flag, population and the current weather of the capital of the country...
+restcountries API used
+Openweather API used
