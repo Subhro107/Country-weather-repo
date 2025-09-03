@@ -111,30 +111,85 @@ try {
 }
 
 
-// Weather by city name + country code (to disambiguate)
+// Weather by city name using protected Vercel API endpoint
 async function fetchWeather(city, countryCode) {
-const url = new URL('https://api.openweathermap.org/data/2.5/weather');
-url.searchParams.set('q', `${city},${countryCode}`);
-url.searchParams.set('appid', window.CONFIG.OPENWEATHER_API_KEY);
-url.searchParams.set('units', 'metric');
-try {
-  const res = await fetch(url.toString());
-  if (!res.ok) {
-    if (res.status === 404) {
-      throw new Error(`Weather data not available for ${city}. The capital city might not be recognized by the weather service.`);
-    } else if (res.status === 401) {
-      throw new Error('Weather service authentication failed. Please check API configuration.');
-    } else {
-      throw new Error(`Weather service error. Please try again later.`);
+  try {
+    // Call our server-side endpoint that protects the API key
+    const url = new URL('/api/weather', window.location.origin);
+    url.searchParams.set('city', city);
+    if (countryCode) {
+      url.searchParams.set('countryCode', countryCode);
     }
+
+    const res = await fetch(url.toString());
+    const data = await res.json();
+
+    if (!res.ok) {
+      if (res.status === 404) {
+        throw new Error(`Weather data not available for ${city}. The capital city might not be recognized by the weather service.`);
+      } else if (res.status === 401) {
+        throw new Error('Weather service authentication failed. Please check API configuration.');
+      } else {
+        throw new Error(data.error || `Weather service error. Please try again later.`);
+      }
+    }
+
+    return data;
+  } catch (error) {
+    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+      throw new Error('Network error. Please check your internet connection and try again.');
+    }
+    throw error; // Re-throw the original error if it's already handled
   }
-  return await res.json();
-} catch (error) {
-  if (error.name === 'TypeError' && error.message.includes('fetch')) {
-    throw new Error('Network error. Please check your internet connection and try again.');
-  }
-  throw error; // Re-throw the original error if it's already handled
 }
+
+// Helper functions for Open-Meteo weather codes
+function getWeatherMain(code) {
+  const mainTypes = {
+    0: 'Clear',
+    1: 'Clear', 2: 'Clouds', 3: 'Clouds',
+    45: 'Mist', 48: 'Mist',
+    51: 'Drizzle', 53: 'Drizzle', 55: 'Drizzle', 56: 'Drizzle', 57: 'Drizzle',
+    61: 'Rain', 63: 'Rain', 65: 'Rain', 66: 'Rain', 67: 'Rain',
+    71: 'Snow', 73: 'Snow', 75: 'Snow', 77: 'Snow',
+    80: 'Rain', 81: 'Rain', 82: 'Rain',
+    85: 'Snow', 86: 'Snow',
+    95: 'Thunderstorm', 96: 'Thunderstorm', 99: 'Thunderstorm'
+  };
+  return mainTypes[code] || 'Clear';
+}
+
+function getWeatherDescription(code) {
+  const descriptions = {
+    0: 'Clear sky',
+    1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast',
+    45: 'Fog', 48: 'Depositing rime fog',
+    51: 'Light drizzle', 53: 'Moderate drizzle', 55: 'Dense drizzle',
+    56: 'Light freezing drizzle', 57: 'Dense freezing drizzle',
+    61: 'Slight rain', 63: 'Moderate rain', 65: 'Heavy rain',
+    66: 'Light freezing rain', 67: 'Heavy freezing rain',
+    71: 'Slight snow fall', 73: 'Moderate snow fall', 75: 'Heavy snow fall',
+    77: 'Snow grains',
+    80: 'Slight rain showers', 81: 'Moderate rain showers', 82: 'Violent rain showers',
+    85: 'Slight snow showers', 86: 'Heavy snow showers',
+    95: 'Thunderstorm', 96: 'Thunderstorm with slight hail', 99: 'Thunderstorm with heavy hail'
+  };
+  return descriptions[code] || 'Clear sky';
+}
+
+function getWeatherIcon(code) {
+  const icons = {
+    0: '01d', // Clear sky
+    1: '02d', 2: '03d', 3: '04d', // Clouds
+    45: '50d', 48: '50d', // Fog
+    51: '09d', 53: '09d', 55: '09d', 56: '09d', 57: '09d', // Drizzle
+    61: '10d', 63: '10d', 65: '10d', 66: '10d', 67: '10d', // Rain
+    71: '13d', 73: '13d', 75: '13d', 77: '13d', // Snow
+    80: '09d', 81: '09d', 82: '09d', // Rain showers
+    85: '13d', 86: '13d', // Snow showers
+    95: '11d', 96: '11d', 99: '11d' // Thunderstorm
+  };
+  return icons[code] || '01d';
 }
 
 
@@ -514,74 +569,79 @@ navigator.geolocation.getCurrentPosition(
 );
 }
 
-// Fetch location data from coordinates using OpenWeatherMap reverse geocoding
+// Fetch location data from coordinates using protected Vercel API endpoint
 async function fetchLocationFromCoords(lat, lon) {
-const url = `https://api.openweathermap.org/geo/1.0/reverse?lat=${lat}&lon=${lon}&limit=5&appid=${window.CONFIG.OPENWEATHER_API_KEY}`;
+  try {
+    console.log('Fetching location for coordinates:', lat, lon);
+    
+    // Call our secure server endpoint that protects the API key
+    const url = new URL('/api/geocode', window.location.origin);
+    url.searchParams.set('lat', lat);
+    url.searchParams.set('lon', lon);
+    
+    const res = await fetch(url.toString());
+    const data = await res.json();
 
-try {
-  console.log('Fetching location for coordinates:', lat, lon);
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error('Failed to get location data from coordinates.');
-  }
-  
-  const data = await res.json();
-  console.log('All reverse geocoding results:', data);
-  
-  if (data && data.length > 0) {
-    // Log all results to see what we're getting
-    data.forEach((result, index) => {
-      console.log(`Result ${index}:`, {
-        name: result.name,
-        state: result.state,
-        country: result.country,
-        lat: result.lat,
-        lon: result.lon
+    if (!res.ok || !data) {
+      throw new Error(data.error || 'Failed to get location data from coordinates.');
+    }
+
+    console.log('All reverse geocoding results:', data);
+
+    if (data && data.length > 0) {
+      // Log all results to see what we're getting
+      data.forEach((result, index) => {
+        console.log(`Result ${index}:`, {
+          name: result.name,
+          state: result.state,
+          country: result.country,
+          lat: result.lat,
+          lon: result.lon
+        });
       });
-    });
-    
-    let bestMatch = data[0]; // Default to first result
-    
-    // Manual override for known locations in India
-    const locationName = bestMatch.name?.toLowerCase();
-    if (locationName && isIndianLocation(locationName, lat, lon)) {
-      console.log('Detected Indian location, overriding country to India');
-      bestMatch = {
-        ...bestMatch,
-        country: 'IN',
-        countryName: 'India'
+
+      let bestMatch = data[0]; // Default to first result
+
+      // Manual override for known locations in India
+      const locationName = bestMatch.name?.toLowerCase();
+      if (locationName && isIndianLocation(locationName, lat, lon)) {
+        console.log('Detected Indian location, overriding country to India');
+        bestMatch = {
+          ...bestMatch,
+          country: 'IN',
+          countryName: 'India'
+        };
+      }
+
+      // Try to find a better match for India in the results
+      const indiaMatch = data.find(location =>
+        location.country === 'IN' ||
+        location.country === 'India' ||
+        (location.state && location.state.toLowerCase().includes('bengal')) ||
+        (location.state && location.state.toLowerCase().includes('west bengal'))
+      );
+
+      if (indiaMatch) {
+        console.log('Found India/Bengal match in results:', indiaMatch);
+        bestMatch = indiaMatch;
+      }
+
+      console.log('Using location:', bestMatch);
+
+      return {
+        name: bestMatch.name,
+        city: bestMatch.name,
+        state: bestMatch.state,
+        country: bestMatch.countryName || bestMatch.country,
+        countryCode: bestMatch.country === 'IN' ? 'IN' : bestMatch.country
       };
+    } else {
+      throw new Error('No location data found for your coordinates.');
     }
-    
-    // Try to find a better match for India in the results
-    const indiaMatch = data.find(location => 
-      location.country === 'IN' || 
-      location.country === 'India' ||
-      (location.state && location.state.toLowerCase().includes('bengal')) ||
-      (location.state && location.state.toLowerCase().includes('west bengal'))
-    );
-    
-    if (indiaMatch) {
-      console.log('Found India/Bengal match in results:', indiaMatch);
-      bestMatch = indiaMatch;
-    }
-    
-    console.log('Using location:', bestMatch);
-    
-    return {
-      name: bestMatch.name,
-      city: bestMatch.name,
-      state: bestMatch.state,
-      country: bestMatch.countryName || bestMatch.country,
-      countryCode: bestMatch.country === 'IN' ? 'IN' : bestMatch.country
-    };
-  } else {
-    throw new Error('No location data found for your coordinates.');
+  } catch (error) {
+    console.error('Reverse geocoding error:', error);
+    throw new Error('Could not determine your location. Please try searching manually.');
   }
-} catch (error) {
-  console.error('Reverse geocoding error:', error);
-  throw new Error('Could not determine your location. Please try searching manually.');
-}
 }
 
 // Function to detect if a location is in India based on coordinates and name

@@ -1,1 +1,28 @@
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local development
+.local
+node_modules/
+.env
+.env.local
+.env.development
+.env.production
 config.js
+
+# Vercel
+.vercel
+
+# Build outputs (if any)
+dist/
+build/
